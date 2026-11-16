@@ -1,0 +1,142 @@
+@startuml
+title Diagrama de Classes - Detecção de Fraudes em Redes de Transações
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam linetype ortho
+skinparam classBackgroundColor #FDFDFD
+skinparam packageStyle rectangle
+
+package "grafo" {
+  class Conta {
+    - banco : str
+    - numero : str
+    + id() : str
+  }
+
+  class Transacao {
+    - origem : Conta
+    - destino : Conta
+    - valor : float
+    - moeda : str
+    - instante : datetime
+    - formatoPagamento : str
+    - rotuloLavagem : bool
+  }
+
+  class Grafo {
+    - adjacencia : dict[Conta, list[Transacao]]
+    - adjacenciaTransposta : dict[Conta, list[Transacao]]
+    + adicionarTransacao(t : Transacao)
+    + contas() : list[Conta]
+    + saidas(c : Conta) : list[Transacao]
+    + entradas(c : Conta) : list[Transacao]
+    + grauSaida(c : Conta) : int
+    + grauEntrada(c : Conta) : int
+    + subgrafo(contas : set[Conta]) : Grafo
+    + numVertices() : int
+    + numArestas() : int
+  }
+}
+
+package "io" {
+  class LeitorDados {
+    + carregarTransacoes(caminho : str, limite : int) : list[Transacao]
+    + carregarPadroes(caminho : str) : list[PadraoReal]
+    + construirGrafo(transacoes : list[Transacao]) : Grafo
+  }
+  class PadraoReal {
+    - tipo : str
+    - transacoes : list[Transacao]
+  }
+}
+
+package "algoritmos" {
+  abstract class Detector {
+    # config : ConfigDeteccao
+    + {abstract} executar(g : Grafo) : ResultadoDeteccao
+    + nome() : str
+  }
+
+  class DetectorCiclos {
+    - tamanhoMaximo : int
+    - janelaTempo : timedelta
+    + executar(g : Grafo) : ResultadoDeteccao
+  }
+
+  class DetectorComponentesFortes {
+    - tamanhoMinimo : int
+    - razaoArestasInternas : float
+    + executar(g : Grafo) : ResultadoDeteccao
+  }
+
+  class DetectorPassagemRapida {
+    - razaoMinima : float
+    - intervaloMaximo : timedelta
+    + executar(g : Grafo) : ResultadoDeteccao
+  }
+
+  class ConfigDeteccao {
+    + parametros : dict
+  }
+
+  class ResultadoDeteccao {
+    - detector : str
+    - contasSuspeitas : set[Conta]
+    - transacoesSuspeitas : list[Transacao]
+    - grupos : list[set[Conta]]
+    - tempoExecucao : float
+  }
+}
+
+package "analise" {
+  class AnalisadorRisco {
+    + combinar(resultados : list[ResultadoDeteccao]) : dict[Conta, float]
+    + ranking(n : int) : list[Conta]
+  }
+}
+
+package "avaliacao" {
+  class Avaliador {
+    + precisao(r : ResultadoDeteccao, g : Grafo) : float
+    + recall(r : ResultadoDeteccao, g : Grafo) : float
+    + medirTempo(d : Detector, g : Grafo) : float
+  }
+}
+
+package "interface" {
+  class InterfaceWeb {
+    + carregarDados()
+    + escolherDetector()
+    + ajustarParametros()
+    + exibirResultados(r : ResultadoDeteccao)
+    + desenharSubgrafo(contas : set[Conta])
+  }
+}
+
+Grafo "1" *-- "0..*" Transacao : contém
+Transacao "*" --> "2" Conta : origem / destino
+Grafo ..> Conta
+
+Detector <|-- DetectorCiclos
+Detector <|-- DetectorComponentesFortes
+Detector <|-- DetectorPassagemRapida
+Detector o-- ConfigDeteccao
+Detector ..> Grafo : analisa
+Detector ..> ResultadoDeteccao : produz
+ResultadoDeteccao "1" o-- "*" Conta
+
+LeitorDados ..> Grafo : constrói
+LeitorDados ..> Transacao : cria
+LeitorDados ..> PadraoReal : cria
+PadraoReal "1" o-- "*" Transacao
+
+AnalisadorRisco ..> ResultadoDeteccao
+Avaliador ..> ResultadoDeteccao
+Avaliador ..> Detector
+Avaliador ..> Grafo
+
+InterfaceWeb ..> LeitorDados
+InterfaceWeb ..> Detector
+InterfaceWeb ..> AnalisadorRisco
+InterfaceWeb ..> Avaliador
+@enduml
