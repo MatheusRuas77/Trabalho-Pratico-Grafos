@@ -2,10 +2,20 @@ import time
 from entrada_saida.LeitorDados import LeitorDados
 from grafo.DetectorCiclos import DetectorCiclos
 from grafo.DetectorComponentes import DetectorComponentes
+from grafo.DetectorCentralidade import DetectorCentralidade
 from grafo.AnaliseGrau import analisar_graus_contas  # Importação da sua parte 
 
 def formatar_inteiro(valor: int) -> str:
     return f"{valor:,}".replace(",", ".")
+
+def formatar_valores_moeda(valores_por_moeda: dict[str, float]) -> str:
+    if not valores_por_moeda:
+        return "0,00"
+    partes = []
+    for moeda, valor in sorted(valores_por_moeda.items(), key=lambda item: item[1], reverse=True):
+        valor_fmt = f"{valor:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+        partes.append(f"{valor_fmt} {moeda}")
+    return " + ".join(partes)
 
 def main():
     leitor = LeitorDados()
@@ -98,6 +108,91 @@ def main():
                 f"({percentual_rotuladas})"
             )
             print(f"    Exemplos de contas: {exemplos}")
+
+# -------------------------------------------#
+#      Centralidade (Contas "Laranjas")      #
+# -------------------------------------------#
+    print("\n-------------------------------------------")
+    print('Executando Análise de Centralidade (Contas "Laranjas")...')
+    inicio_cent = time.time()
+    detector_cent = DetectorCentralidade(
+        amostraFontes=1000,
+        profundidadeMax=6,
+        tamanhoMinLadoPonte=2,
+        limiteResultados=20,
+    )
+    res_cent = detector_cent.detectar(grafo)
+    modo = (
+        "exato"
+        if res_cent.calculoExato
+        else f"amostrado ({formatar_inteiro(res_cent.fontesAmostradas)} fontes)"
+    )
+    print(f"Análise de centralidade concluída em {time.time() - inicio_cent:.1f}s ({modo})")
+    print(f"  Contas com intermediação (> 0): {formatar_inteiro(res_cent.contasComIntermediacao)}")
+    print(
+        f"  Pontos de articulação (vértices de corte): "
+        f"{formatar_inteiro(res_cent.totalPontosArticulacao)}"
+    )
+    print(
+        f"  Pontes estruturais: {formatar_inteiro(res_cent.totalPontes)} "
+        f"({formatar_inteiro(res_cent.totalPontesEntreGrupos)} entre grupos com >= 2 contas)"
+    )
+
+    if res_cent.intermediarias:
+        rotuladas_interm = sum(1 for c in res_cent.intermediarias if c.possuiRotuloLavagem())
+        print(
+            f"\n  Principais contas intermediárias (laranjas) — "
+            f"{rotuladas_interm}/{len(res_cent.intermediarias)} com rótulo de lavagem:"
+        )
+        for conta_int in res_cent.principaisIntermediarias(5):
+            tag_art = " | vértice de corte" if conta_int.ehPontoArticulacao else ""
+            tag_lav = (
+                f" | lavagem={conta_int.numRotuladasLavagem}"
+                if conta_int.possuiRotuloLavagem()
+                else ""
+            )
+            repasse = f"{conta_int.razaoRepasse:.1%}".replace(".", ",")
+            moedas = len(conta_int.razaoRepassePorMoeda)
+            tag_moedas = f" ({moedas} moedas)" if moedas > 1 else ""
+            print(
+                f"    {conta_int.idConta} | centralidade={conta_int.centralidade:.6e} "
+                f"| in={conta_int.grauEntrada} out={conta_int.grauSaida} "
+                f"| repasse={repasse}{tag_moedas}{tag_art}{tag_lav}"
+            )
+
+    if res_cent.pontosArticulacao:
+        print("\n  Principais pontos de articulação (gargalos da rede):")
+        for art in res_cent.principaisArticulacoes(5):
+            tag_lav = (
+                f" | lavagem={art.numRotuladasLavagem}"
+                if art.possuiRotuloLavagem()
+                else ""
+            )
+            print(
+                f"    {art.idConta} | fragmenta em {formatar_inteiro(art.numComponentesAoRemover)} componentes "
+                f"| in={art.grauEntrada} out={art.grauSaida} "
+                f"| centralidade={art.centralidade:.6e}{tag_lav}"
+            )
+
+    if res_cent.pontes:
+        rotuladas_pontes = sum(1 for p in res_cent.pontes if p.possuiRotuloLavagem())
+        print(
+            f"\n  Principais pontes nos fluxos financeiros — "
+            f"{rotuladas_pontes}/{len(res_cent.pontes)} com rótulo de lavagem:"
+        )
+        for ponte in res_cent.principaisPontes(5):
+            tag_lav = (
+                f" | lavagem={ponte.numRotuladasLavagem}"
+                if ponte.possuiRotuloLavagem()
+                else ""
+            )
+            valores_fmt = formatar_valores_moeda(ponte.valoresPorMoeda)
+            print(
+                f"    {ponte} | lados=({formatar_inteiro(ponte.tamanhoLadoA)}, "
+                f"{formatar_inteiro(ponte.tamanhoLadoB)}) "
+                f"| tx={formatar_inteiro(ponte.numTransacoes)} "
+                f"| valor={valores_fmt}{tag_lav}"
+            )
 
 
 if __name__ == "__main__":
