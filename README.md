@@ -28,6 +28,8 @@
 - [Funcionalidades Principais](#-funcionalidades-principais)
 - [Tecnologias Utilizadas](#-tecnologias-utilizadas)
 - [Instalação e Execução](#-instalação-e-execução)
+  - [Programa de terminal](#programa-de-terminal)
+  - [Interface web](#interface-web)
 - [Estrutura de Pastas](#-estrutura-de-pastas)
 - [Modelagem e Demonstração](#-modelagem-e-demonstração)
 - [Autores](#-autores)
@@ -79,6 +81,12 @@ A proposta consiste em construir uma estrutura própria de multigrafo direcionad
 * **Estrutura e Algoritmos de Grafos:** 100% implementação própria utilizando apenas a biblioteca padrão do Python (`csv`, `collections`, `dataclasses`, `datetime`, `heapq`, `logging`, `pathlib`, `random`, `time`)
 * **Conformidade com o TP:** Nenhuma biblioteca pronta de grafos (como NetworkX ou igraph) é utilizada na criação ou processamento do grafo
 
+### 🌐 Interface web
+
+- **Frontend** — Vue 3, Vite e Tailwind CSS.
+- **Visualizações** — Cytoscape.js para grafos interativos e ECharts para a distribuição dos componentes conexos.
+- **API** — FastAPI e Uvicorn para acessar os algoritmos em Python.
+
 ### 📐 Modelagem e Documentação
 
 * **Diagramas UML:** PlantUML (`.puml` / `.png`)
@@ -91,6 +99,7 @@ A proposta consiste em construir uma estrutura própria de multigrafo direcionad
 ### Pré-requisitos
 
 * **Python:** 3.12 ou superior
+* **Node.js:** 22.12 ou superior para executar a interface web
 * **Git** (com suporte a Git LFS caso a base de dados seja versionada via LFS)
 
 ### 1) Clone o repositório
@@ -111,7 +120,7 @@ dados/
 └── LI-Large_Patterns.txt
 ```
 
-### 3) Execute a ferramenta
+### Programa de terminal
 
 A partir da raiz do repositório:
 
@@ -120,6 +129,51 @@ python codigo/main.py
 ```
 
 > **Dica:** Para testes rápidos em um recorte menor da base, ajuste o parâmetro `limite` em `leitor.carregarTransacoes("dados/HI-Small_Trans.csv", limite=0)` no arquivo [codigo/main.py](codigo/main.py) (`0` carrega todas as 5.078.345 transações).
+
+
+### Interface web
+
+Execute os comandos a partir da raiz do projeto. Crie o ambiente virtual e instale as dependências.
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+npm --prefix frontend ci
+```
+
+No Windows com PowerShell, crie o ambiente com `python -m venv .venv` e use `.\.venv\Scripts\python.exe` nos comandos que chamam o Python do ambiente virtual. Se aparecer `No module named pip`, execute `.venv/bin/python -m ensurepip --upgrade` com o executável correspondente ao seu sistema e repita a instalação.
+
+Inicie a API em um terminal.
+
+```sh
+.venv/bin/python -m uvicorn api:app --app-dir codigo
+```
+
+Em outro terminal, inicie o frontend.
+
+```sh
+npm --prefix frontend run dev
+```
+
+Abra a [interface web](http://localhost:5173). O Vite encaminha as requisições de `/api` para a porta 8000. Consulte os endpoints na [documentação interativa da API](http://127.0.0.1:8000/docs).
+
+#### Base analisada
+
+A interface web começa com as primeiras **253.917 transações válidas**, correspondentes a **5% da base HI-Small**, arredondados para baixo. Digite outra quantidade em **Limite**, no cabeçalho, e pressione Enter. Para carregar a **Base inteira**, apague o valor e saia do campo ou pressione Enter.
+
+Para escolher outro limite ao iniciar a API em Linux ou WSL, defina `GRAFOS_LIMITE_TRANSACOES`. Use `0` para carregar todas as 5.078.345 transações.
+
+```sh
+GRAFOS_LIMITE_TRANSACOES=10000 .venv/bin/python -m uvicorn api:app --app-dir codigo
+```
+
+A troca feita na interface vale para todos os clientes conectados à mesma instância até que a API seja reiniciada. A API expõe o estado em `GET /api/base` e aceita alterações em `PUT /api/base`, com um corpo como `{"limite": 10000}`. Se uma análise anterior estiver rodando, a troca aguarda sua conclusão.
+
+#### Leitura dos resultados
+
+- A tela de **Ciclos** mostra todas as transferências do ciclo selecionado. O detector busca ciclos de 2 a 6 contas com ordem temporal.
+- O grafo de **Grau** mostra todas as transferências diretas da conta selecionada. O grafo de **Componentes conexos** mostra todas as transferências internas do componente selecionado. Cada transferência é uma aresta. As tabelas e a lista lateral de contas continuam paginadas.
+- A tela de **Centralidade** usa o `DetectorCentralidade` sobre o grafo da base selecionada. Quando há mais de 1.000 contas elegíveis como origem, o detector sorteia 1.000 para iniciar a busca, que percorre até 6 transferências por caminho. Outras contas podem pontuar se aparecerem como intermediárias. O cálculo roda em segundo plano e o ranking é paginado.
 
 ---
 
@@ -141,12 +195,21 @@ python codigo/main.py
 │   │   ├── DetectorCiclos.py
 │   │   ├── DetectorComponentes.py
 │   │   └── grafo.py
+│   ├── api.py
 │   └── main.py
 ├── dados/
 │   ├── HI-Small_accounts.csv
 │   ├── HI-Small_Trans.csv
 │   └── LI-Large_Patterns.txt
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   ├── router/
+│   │   ├── services/
+│   │   └── views/
+│   └── package.json
 ├── .gitattributes
+├── requirements.txt
 └── README.md
 ```
 
@@ -158,7 +221,7 @@ python codigo/main.py
 | :---: | :---: |
 | <img src="artefatos/01_classes.png" width="500px"/> | <img src="artefatos/02_casos_de_uso.png" width="500px"/> |
 
-> 🚧 Prints da interface gráfica e link do vídeo de demonstração serão adicionados conforme as etapas finais avançarem.
+> As telas podem ser consultadas executando a [interface web](#interface-web).
 
 <!--
 ### 🎥 Vídeo de Demonstração
