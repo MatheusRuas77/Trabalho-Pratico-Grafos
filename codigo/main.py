@@ -1,7 +1,11 @@
 import time
 from entrada_saida.LeitorDados import LeitorDados
 from grafo.DetectorCiclos import DetectorCiclos
+from grafo.DetectorComponentes import DetectorComponentes
 from grafo.AnaliseGrau import analisar_graus_contas  # Importação da sua parte 
+
+def formatar_inteiro(valor: int) -> str:
+    return f"{valor:,}".replace(",", ".")
 
 def main():
     leitor = LeitorDados()
@@ -54,6 +58,46 @@ def main():
     if resultados_grau['fan_out']:
         ex_fan_out = list(resultados_grau['fan_out'].items())[:3]
         print(f"  Exemplos Fan-Out (Saídas elevadas): {ex_fan_out}")
+
+# -------------------------------------------#
+#       Componentes Conexos (Clusters)       #
+# -------------------------------------------#
+    tamanhoMin = 2
+    componentes = DetectorComponentes(tamanhoMin=tamanhoMin).detectar(grafo)
+    print("\n-------------------------------------------")
+    print("Componentes conexos da rede")
+    for tipo, resumo in (
+        ("Componentes fracamente conexos", componentes.fracos),
+        ("Componentes fortemente conexos", componentes.fortes),
+    ):
+        print(f"\n{tipo}")
+        print(f"  Total: {formatar_inteiro(resumo.totalComponentes)}")
+        print(f"  Com mais de uma conta: {formatar_inteiro(resumo.componentesMulticonta)}")
+        print(f"  Maior componente: {formatar_inteiro(resumo.tamanhoMaior)} contas")
+
+        print(f"\n  {'Contas por componente':>21}  {'Quantidade':>10}")
+        for tamanho, quantidade in sorted(resumo.distribuicaoPorTamanho.items()):
+            print(f"  {formatar_inteiro(tamanho):>21}  {formatar_inteiro(quantidade):>10}")
+
+        print(f"\n  Maiores clusters com pelo menos {tamanhoMin} contas")
+        for cluster in resumo.maioresClusters():
+            exemplos = ", ".join(cluster.idsContas[:5])
+            if cluster.numContas > 5:
+                exemplos += ", …"
+            proporcao_rotuladas = (
+                cluster.numRotuladasLavagem / cluster.numTransacoes
+                if cluster.numTransacoes else 0.0
+            )
+            percentual_rotuladas = f"{proporcao_rotuladas:.2%}".replace(".", ",")
+            densidade = f"{cluster.densidade:.4%}".replace(".", ",")
+            print(f"\n  Cluster com {formatar_inteiro(cluster.numContas)} contas")
+            print(f"    Transações internas: {formatar_inteiro(cluster.numTransacoes)}")
+            print(f"    Densidade: {densidade}")
+            print(
+                f"    Rotuladas como lavagem: {formatar_inteiro(cluster.numRotuladasLavagem)} "
+                f"({percentual_rotuladas})"
+            )
+            print(f"    Exemplos de contas: {exemplos}")
 
 
 if __name__ == "__main__":

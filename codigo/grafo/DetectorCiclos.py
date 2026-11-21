@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from grafo.DetectorComponentes import componentesFortes
 from grafo.grafo import Conta, Grafo, Transacao
 
 
@@ -128,53 +129,4 @@ class DetectorCiclos:
         return None
 
     def _componentesFortes(self, grafo: Grafo) -> list[list[Conta]]:
-        indice: dict[Conta, int] = {}
-        baixo: dict[Conta, int] = {}
-        naPilha: set[Conta] = set()
-        pilha: list[Conta] = []
-        componentes: list[list[Conta]] = []
-        contador = 0
-
-        def sucessores(v: Conta):
-            return iter([t.destino for t in grafo.saidas(v)])
-
-        for raiz in grafo.contas():
-            if raiz in indice:
-                continue
-            indice[raiz] = baixo[raiz] = contador
-            contador += 1
-            pilha.append(raiz)
-            naPilha.add(raiz)
-            trabalho = [(raiz, sucessores(raiz))]
-
-            while trabalho:
-                v, it = trabalho[-1]
-                desceu = False
-                for w in it:
-                    if w not in indice:
-                        indice[w] = baixo[w] = contador
-                        contador += 1
-                        pilha.append(w)
-                        naPilha.add(w)
-                        trabalho.append((w, sucessores(w)))
-                        desceu = True
-                        break
-                    if w in naPilha:
-                        baixo[v] = min(baixo[v], indice[w])
-                if desceu:
-                    continue
-
-                trabalho.pop()
-                if trabalho:
-                    pai = trabalho[-1][0]
-                    baixo[pai] = min(baixo[pai], baixo[v])
-                if baixo[v] == indice[v]:
-                    componente = []
-                    while True:
-                        w = pilha.pop()
-                        naPilha.discard(w)
-                        componente.append(w)
-                        if w == v:
-                            break
-                    componentes.append(componente)
-        return componentes
+        return componentesFortes(grafo)
