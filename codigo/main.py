@@ -1,3 +1,4 @@
+from datetime import timedelta
 import time
 from entrada_saida.LeitorDados import LeitorDados
 from grafo.DetectorCiclos import DetectorCiclos
@@ -119,6 +120,8 @@ def main():
         amostraFontes=1000,
         profundidadeMax=6,
         tamanhoMinLadoPonte=2,
+        intervaloMaximo=timedelta(hours=24),
+        razaoMinimaRepasse=0.8,
         limiteResultados=20,
     )
     res_cent = detector_cent.detectar(grafo)
@@ -137,6 +140,13 @@ def main():
         f"  Pontes estruturais: {formatar_inteiro(res_cent.totalPontes)} "
         f"({formatar_inteiro(res_cent.totalPontesEntreGrupos)} entre grupos com >= 2 contas)"
     )
+    if res_cent.intervaloMaximo is not None:
+        horas = int(res_cent.intervaloMaximo.total_seconds() // 3600)
+        razao_pct = f"{res_cent.razaoMinimaRepasse:.0%}"
+        print(
+            f"  Contas com passagem rápida (<= {horas}h, razão >= {razao_pct}): "
+            f"{formatar_inteiro(res_cent.totalContasPassagemRapida)}"
+        )
 
     if res_cent.intermediarias:
         rotuladas_interm = sum(1 for c in res_cent.intermediarias if c.possuiRotuloLavagem())
@@ -146,6 +156,11 @@ def main():
         )
         for conta_int in res_cent.principaisIntermediarias(5):
             tag_art = " | vértice de corte" if conta_int.ehPontoArticulacao else ""
+            tag_pr = (
+                f" | passagem rápida={conta_int.numPassagensRapidas}x"
+                if conta_int.numPassagensRapidas > 0
+                else ""
+            )
             tag_lav = (
                 f" | lavagem={conta_int.numRotuladasLavagem}"
                 if conta_int.possuiRotuloLavagem()
@@ -157,7 +172,28 @@ def main():
             print(
                 f"    {conta_int.idConta} | centralidade={conta_int.centralidade:.6e} "
                 f"| in={conta_int.grauEntrada} out={conta_int.grauSaida} "
-                f"| repasse={repasse}{tag_moedas}{tag_art}{tag_lav}"
+                f"| repasse={repasse}{tag_moedas}{tag_pr}{tag_art}{tag_lav}"
+            )
+
+    if res_cent.passagensRapidas:
+        rotuladas_pr = sum(1 for p in res_cent.passagensRapidas if p.possuiRotuloLavagem())
+        print(
+            f"\n  Principais contas com passagem rápida + intermediação — "
+            f"{rotuladas_pr}/{len(res_cent.passagensRapidas)} com rótulo de lavagem:"
+        )
+        for pr in res_cent.principaisPassagensRapidas(5):
+            tag_art = " | vértice de corte" if pr.ehPontoArticulacao else ""
+            tag_lav = (
+                f" | lavagem={pr.numRotuladasLavagem}"
+                if pr.possuiRotuloLavagem()
+                else ""
+            )
+            melhor_pct = f"{pr.melhorRazao:.1%}".replace(".", ",")
+            mins = int(pr.menorIntervalo.total_seconds() // 60)
+            print(
+                f"    {pr.idConta} | eventos={formatar_inteiro(pr.numEventos)} "
+                f"| melhor razão={melhor_pct} | menor dt={mins}min "
+                f"| centralidade={pr.centralidade:.6e}{tag_art}{tag_lav}"
             )
 
     if res_cent.pontosArticulacao:

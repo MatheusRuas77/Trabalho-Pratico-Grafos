@@ -1,9 +1,10 @@
 from collections import deque
 from dataclasses import dataclass
+from datetime import timedelta
 from heapq import nlargest
 import random
 
-from grafo.grafo import Conta, Grafo
+from grafo.grafo import Conta, Grafo, Transacao
 
 
 def _construirAdjacenciaDirecionada(
@@ -292,6 +293,175 @@ def _executarTarjanPontesEArticulacoes(
 
 
 @dataclass
+class PassagemRapida:
+    """Evidência temporal de repasse rápido (pass-through) em uma conta.
+
+    Identifica contas que recebem valores e os repassam na mesma moeda dentro de
+    uma janela temporal curta (`intervaloMaximo`) com razão mínima compatível
+    (`razaoMinima`), comportamento característico de contas "laranjas".
+    """
+
+    conta: Conta
+    numEventos: int
+    melhorRazao: float
+    menorIntervalo: timedelta
+    valoresPorMoeda: dict[str, float]
+    numRotuladasLavagem: int
+    centralidade: float = 0.0
+    ehPontoArticulacao: bool = False
+
+    @property
+    def idConta(self) -> str:
+        return self.conta.id()
+
+    def possuiRotuloLavagem(self) -> bool:
+        return self.numRotuladasLavagem > 0
+
+
+def _analisarPassagemRapidaConta(
+    grafo: Grafo,
+    conta: Conta,
+    intervaloMaximo: timedelta,
+    razaoMinima: float,
+) -> PassagemRapida | None:
+    """Analisa passagem rápida por janela deslizante O((d_in + d_out) log d) por moeda."""
+    entradas = grafo.entradas(conta)
+    saidas = grafo.saidas(conta)
+    if not entradas or not saidas:
+        return None
+
+    entradasPorMoeda: dict[str, list[Transacao]] = {}
+    for transacao in entradas:
+        if transacao.origem != conta:
+            entradasPorMoeda.setdefault(transacao.moeda, []).append(transacao)
+    if not entradasPorMoeda:
+        return None
+
+    saidasPorMoeda: dict[str, list[Transacao]] = {}
+    for transacao in saidas:
+        if transacao.destino != conta and transacao.moeda in entradasPorMoeda:
+            saidasPorMoeda.setdefault(transacao.moeda, []).append(transacao)
+    if not saidasPorMoeda:
+        return None
+
+    numEventos = 0
+    melhorRazao = 0.0
+    menorIntervalo: timedelta | None = None
+    valoresPorMoeda: dict[str, float] = {}
+
+    for moeda, listaSaidas in saidasPorMoeda.items():
+        listaEntradas = entradasPorMoeda[moeda]
+        listaEntradas.sort(key=lambda t: t.instante)
+        listaSaidas.sort(key=lambda t: t.instante)
+
+        mIn = len(listaEntradas)
+        mOut = len(listaSaidas)
+
+        prefIn = [0.0] * (mIn + 1)
+        for idx, transacao in enumerate(listaEntradas):
+            prefIn[idx + 1] = prefIn[idx] + transacao.valor
+
+        prefOut = [0.0] * (mOut + 1)
+        for idx, transacao in enumerate(listaSaidas):
+            prefOut[idx + 1] = prefOut[idx] + transacao.valor
+
+        esq = 0
+        dirOut = 0
+        inFim = 0
+
+        for i, tIn in enumerate(listaEntradas):
+            t0 = tIn.instante
+            limite = t0 + intervaloMaximo
+
+            while dirOut < mOut and listaSaidas[dirOut].instante <= limite:
+                dirOut += 1
+            while esq < dirOut and listaSaidas[esq].instante < t0:
+                esq += 1
+            if esq == dirOut:
+                continue
+
+            tUltimoOut = listaSaidas[dirOut - 1].instante
+            if inFim < i:
+                inFim = i
+            while inFim < mIn and listaEntradas[inFim].instante <= tUltimoOut:
+                inFim += 1
+
+            somaIn = prefIn[inFim] - prefIn[i]
+            somaOut = prefOut[dirOut] - prefOut[esq]
+            maiorJanela = somaIn if somaIn >= somaOut else somaOut
+            razaoJanela = (
+                (somaOut if somaIn >= somaOut else somaIn) / maiorJanela
+                if maiorJanela > 0.0
+                else 0.0
+            )
+
+            valIn = tIn.valor
+            valParOut = listaSaidas[esq].valor
+            maiorPar = valIn if valIn >= valParOut else valParOut
+            razaoPar = (
+                (valParOut if valIn >= valParOut else valIn) / maiorPar
+                if maiorPar > 0.0
+                else 0.0
+            )
+
+            razao = razaoJanela if razaoJanela >= razaoPar else razaoPar
+            if razao >= razaoMinima:
+                numEventos += 1
+                if razao > melhorRazao:
+                    melhorRazao = razao
+                deltaT = listaSaidas[esq].instante - t0
+                if menorIntervalo is None or deltaT < menorIntervalo:
+                    menorIntervalo = deltaT
+                valoresPorMoeda[moeda] = valoresPorMoeda.get(moeda, 0.0) + valIn
+
+    if numEventos == 0 or menorIntervalo is None:
+        return None
+
+    lavagemEntrada = sum(1 for t in entradas if t.origem != conta and t.rotuloLavagem)
+    lavagemSaida = sum(1 for t in saidas if t.rotuloLavagem)
+
+    return PassagemRapida(
+        conta=conta,
+        numEventos=numEventos,
+        melhorRazao=melhorRazao,
+        menorIntervalo=menorIntervalo,
+        valoresPorMoeda=valoresPorMoeda,
+        numRotuladasLavagem=lavagemEntrada + lavagemSaida,
+    )
+
+
+def detectarPassagemRapida(
+    grafo: Grafo,
+    intervaloMaximo: timedelta = timedelta(hours=24),
+    razaoMinima: float = 0.8,
+) -> dict[Conta, PassagemRapida]:
+    """Detecta contas com repasse rápido (pass-through) em janela temporal.
+
+    Para cada conta e cada moeda movimentada em entrada e saída, usa ponteiros
+    deslizantes com somas de prefixo para verificar se os valores recebidos são
+    repassados em até `intervaloMaximo` com simetria mínima `razaoMinima`.
+
+    Complexidade: O(|V| + |E| log d_max) em tempo e O(|V| + |E|) em espaço.
+    """
+    if intervaloMaximo < timedelta(0):
+        raise ValueError("intervaloMaximo deve ser >= 0.")
+    if not (0.0 < razaoMinima <= 1.0):
+        raise ValueError("razaoMinima deve estar no intervalo (0, 1].")
+
+    resultado: dict[Conta, PassagemRapida] = {}
+    for conta in grafo.contas():
+        evidencia = _analisarPassagemRapidaConta(
+            grafo=grafo,
+            conta=conta,
+            intervaloMaximo=intervaloMaximo,
+            razaoMinima=razaoMinima,
+        )
+        if evidencia is not None:
+            resultado[conta] = evidencia
+    return resultado
+
+
+@dataclass
 class ContaIntermediaria:
     """Conta identificada como intermediária nos fluxos financeiros (possível laranja).
 
@@ -316,6 +486,9 @@ class ContaIntermediaria:
     razaoRepassePorMoeda: dict[str, float]
     razaoRepasse: float
     numRotuladasLavagem: int
+    numPassagensRapidas: int = 0
+    melhorRazaoPassagemRapida: float = 0.0
+    menorIntervaloRepasse: timedelta | None = None
 
     @property
     def idConta(self) -> str:
@@ -371,7 +544,7 @@ class PonteFluxo:
 
 @dataclass
 class ResultadoCentralidade:
-    """Resultado consolidado da análise de centralidade e pontes na rede."""
+    """Resultado consolidado da análise de centralidade, pontes e passagem rápida."""
 
     totalContasAnalisadas: int
     fontesAmostradas: int
@@ -380,9 +553,13 @@ class ResultadoCentralidade:
     totalPontosArticulacao: int
     totalPontes: int
     totalPontesEntreGrupos: int
+    intervaloMaximo: timedelta | None
+    razaoMinimaRepasse: float
+    totalContasPassagemRapida: int
     intermediarias: list[ContaIntermediaria]
     pontosArticulacao: list[PontoArticulacao]
     pontes: list[PonteFluxo]
+    passagensRapidas: list[PassagemRapida]
     centralidades: dict[Conta, float]
 
     def principaisIntermediarias(self, limite: int = 10) -> list[ContaIntermediaria]:
@@ -394,17 +571,23 @@ class ResultadoCentralidade:
     def principaisPontes(self, limite: int = 10) -> list[PonteFluxo]:
         return self.pontes[:limite]
 
+    def principaisPassagensRapidas(self, limite: int = 10) -> list[PassagemRapida]:
+        return self.passagensRapidas[:limite]
+
 
 class DetectorCentralidade:
     """Identifica contas intermediárias ("laranjas"), vértices de corte e pontes.
 
-    Combina duas abordagens complementares de Teoria dos Grafos:
+    Combina três abordagens complementares de Teoria dos Grafos e análise temporal:
       1. Centralidade de Intermediação (Brandes / Brandes-Pich) no grafo
          direcionado, destacando contas que concentram caminhos mínimos de
          escoamento financeiro entre outras contas.
       2. Algoritmo de Tarjan iterativo no grafo não-direcionado subjacente para
          localizar pontes (canais únicos entre sub-redes) e pontos de
          articulação (contas gargalo cuja remoção desconecta a rede).
+      3. Análise de passagem rápida em janela temporal (`intervaloMaximo` e
+         `razaoMinimaRepasse`), identificando contas que recebem e repassam
+         valores rapidamente na mesma moeda.
     """
 
     def __init__(
@@ -414,6 +597,8 @@ class DetectorCentralidade:
         normalizar: bool = True,
         tamanhoMinLadoPonte: int = 2,
         exigirEntradaESaida: bool = True,
+        intervaloMaximo: timedelta | None = timedelta(hours=24),
+        razaoMinimaRepasse: float = 0.8,
         limiteResultados: int = 20,
         semente: int = 42,
     ):
@@ -423,6 +608,10 @@ class DetectorCentralidade:
             raise ValueError("profundidadeMax deve ser >= 0.")
         if tamanhoMinLadoPonte < 1:
             raise ValueError("tamanhoMinLadoPonte deve ser >= 1.")
+        if intervaloMaximo is not None and intervaloMaximo < timedelta(0):
+            raise ValueError("intervaloMaximo deve ser >= 0 ou None.")
+        if not (0.0 < razaoMinimaRepasse <= 1.0):
+            raise ValueError("razaoMinimaRepasse deve estar no intervalo (0, 1].")
         if limiteResultados < 0:
             raise ValueError("limiteResultados deve ser >= 0.")
 
@@ -431,6 +620,8 @@ class DetectorCentralidade:
         self.normalizar = normalizar
         self.tamanhoMinLadoPonte = tamanhoMinLadoPonte
         self.exigirEntradaESaida = exigirEntradaESaida
+        self.intervaloMaximo = intervaloMaximo
+        self.razaoMinimaRepasse = razaoMinimaRepasse
         self.limiteResultados = limiteResultados
         self.semente = semente
 
@@ -458,6 +649,18 @@ class DetectorCentralidade:
         pontesBrutas, articulacoesBrutas = _executarTarjanPontesEArticulacoes(
             contas, adjNaoDir
         )
+
+        # 0. Passagem rápida em janela temporal (opcional)
+        passagensMapa: dict[Conta, PassagemRapida] = {}
+        if self.intervaloMaximo is not None:
+            passagensMapa = detectarPassagemRapida(
+                grafo=grafo,
+                intervaloMaximo=self.intervaloMaximo,
+                razaoMinima=self.razaoMinimaRepasse,
+            )
+            for conta, evidencia in passagensMapa.items():
+                evidencia.centralidade = centralidades.get(conta, 0.0)
+                evidencia.ehPontoArticulacao = conta in articulacoesBrutas
 
         # 1. Contas intermediárias (centralidade > 0)
         candidatasIndices = [i for i in range(n) if pontuacoes[i] > 0.0]
@@ -498,6 +701,7 @@ class DetectorCentralidade:
                 numComponentes=articulacoesBrutas.get(contas[i], 1),
                 grauEntrada=grausEntrada[i],
                 grauSaida=grausSaida[i],
+                passagemRapida=passagensMapa.get(contas[i]),
             )
             for i in selecionadasInterm
         ]
@@ -557,6 +761,33 @@ class DetectorCentralidade:
                 reverse=True,
             )
 
+        # 4. Ranking de contas com passagem rápida (priorizando interseção com centralidade/corte)
+        listaPassagens = list(passagensMapa.values())
+        if self.limiteResultados > 0 and len(listaPassagens) > self.limiteResultados:
+            passagensRanking = nlargest(
+                self.limiteResultados,
+                listaPassagens,
+                key=lambda p: (
+                    p.centralidade > 0.0,
+                    p.ehPontoArticulacao,
+                    p.centralidade,
+                    p.numEventos,
+                    p.melhorRazao,
+                ),
+            )
+        else:
+            passagensRanking = sorted(
+                listaPassagens,
+                key=lambda p: (
+                    p.centralidade > 0.0,
+                    p.ehPontoArticulacao,
+                    p.centralidade,
+                    p.numEventos,
+                    p.melhorRazao,
+                ),
+                reverse=True,
+            )
+
         return ResultadoCentralidade(
             totalContasAnalisadas=n,
             fontesAmostradas=fontesAmostradas,
@@ -565,9 +796,13 @@ class DetectorCentralidade:
             totalPontosArticulacao=len(articulacoesBrutas),
             totalPontes=len(pontesBrutas),
             totalPontesEntreGrupos=len(pontesFiltradas),
+            intervaloMaximo=self.intervaloMaximo,
+            razaoMinimaRepasse=self.razaoMinimaRepasse,
+            totalContasPassagemRapida=len(passagensMapa),
             intermediarias=intermediarias,
             pontosArticulacao=pontosArticulacao,
             pontes=pontesRanking,
+            passagensRapidas=passagensRanking,
             centralidades=centralidades,
         )
 
@@ -579,6 +814,7 @@ class DetectorCentralidade:
         numComponentes: int,
         grauEntrada: int,
         grauSaida: int,
+        passagemRapida: PassagemRapida | None = None,
     ) -> ContaIntermediaria:
         entradas = grafo.entradas(conta)
         saidas = grafo.saidas(conta)
@@ -641,6 +877,9 @@ class DetectorCentralidade:
             razaoRepassePorMoeda=razaoRepassePorMoeda,
             razaoRepasse=razaoRepasse,
             numRotuladasLavagem=lavagemEntrada + lavagemSaida,
+            numPassagensRapidas=passagemRapida.numEventos if passagemRapida else 0,
+            melhorRazaoPassagemRapida=passagemRapida.melhorRazao if passagemRapida else 0.0,
+            menorIntervaloRepasse=passagemRapida.menorIntervalo if passagemRapida else None,
         )
 
     @staticmethod
