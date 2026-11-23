@@ -3,44 +3,42 @@ title Diagrama de Casos de Uso - Ferramenta de Detecção de Fraudes
 left to right direction
 skinparam shadowing false
 skinparam packageStyle rectangle
+skinparam usecaseBackgroundColor #F4F4F4
 
 actor "Analista de\nConformidade" as Analista
 actor "Dataset IBM AML\n(arquivos CSV)" as Dataset <<sistema externo>>
 
 rectangle "Ferramenta de Detecção de Fraudes em Grafos" {
-  usecase "Carregar dados de transações" as UC1
-  usecase "Definir recorte\n(período / nº de transações)" as UC2
-  usecase "Construir grafo de transações" as UC3
-  
-  usecase "Executar detector de fraudes" as UC_Base
-  usecase "Executar detector de\nlavagem circular (ciclos)" as UC4
-  usecase "Executar detector de\ngrupos fechados (SCC)" as UC5
-  usecase "Executar detector de\nconta laranja" as UC6
-  
-  usecase "Ajustar parâmetros\ndos detectores" as UC7
-  usecase "Visualizar contas e\nsubgrafos suspeitos" as UC8
-  usecase "Ver ranking de\nscore de suspeita" as UC9
-  usecase "Avaliar resultados\n(precisão e recall)" as UC10
-  usecase "Medir desempenho\n(tempo de execução)" as UC11
+  usecase "Carregar dados de transações\ne metadados de contas" as UC_Carregar
+  usecase "Construir grafo direcionado\nde transações" as UC_Grafo
+  usecase "Definir recorte da base\n(limite de transações)" as UC_Recorte
+
+  usecase "Executar detecção e análise\nde padrões suspeitos" as UC_Executar
+  usecase "Detectar contas intermediárias,\npontes e passagem rápida" as UC_Laranja
+  usecase "Detectar componentes conexos\n(fracos e fortes / SCC)" as UC_SCC
+  usecase "Detectar lavagem circular\n(ciclos temporais)" as UC_Ciclos
+  usecase "Analisar graus de entrada/saída\n(Fan-In / Fan-Out)" as UC_Graus
+
+  usecase "Ajustar parâmetros\ndos detectores" as UC_Params
+  usecase "Consultar resumo e rankings\nde métricas de suspeita" as UC_Rankings
+  usecase "Visualizar contas, vizinhança\ne subgrafos suspeitos" as UC_Visualizar
 }
 
-Analista --> UC1
-Analista --> UC2
-Analista --> UC_Base
-Analista --> UC9
-Analista --> UC10
-Analista --> UC11
+Analista -- UC_Carregar
+Analista -- UC_Recorte
+Analista -- UC_Executar
+Analista -- UC_Rankings
+Analista -- UC_Visualizar
 
-UC_Base <|-- UC4
-UC_Base <|-- UC5
-UC_Base <|-- UC6
+UC_Carregar -- Dataset
 
-UC1 ..> UC3 : <<include>>
-UC9 ..> UC_Base : <<include>>
+UC_Carregar ..> UC_Grafo : <<include>>
+UC_Rankings ..> UC_Executar : <<include>>
+UC_Params ..> UC_Executar : <<extend>>
+UC_Visualizar ..> UC_Rankings : <<extend>>
 
-UC7 ..> UC_Base : <<extend>>
-UC8 ..> UC_Base : <<extend>>
-
-UC1 -- Dataset
-UC10 -- Dataset : usa rótulos
+UC_Laranja -|> UC_Executar
+UC_SCC -|> UC_Executar
+UC_Ciclos -|> UC_Executar
+UC_Graus -|> UC_Executar
 @enduml
