@@ -6,26 +6,31 @@ skinparam linetype ortho
 skinparam classBackgroundColor #FDFDFD
 skinparam packageStyle rectangle
 
-package "grafo" {
-  class Conta {
-    - banco : str
-    - numero : str
+package "grafo (modelo)" as modelo {
+  class Conta <<frozen>> {
+    + banco : str
+    + numero : str
     + id() : str
   }
 
   class Transacao {
-    - origem : Conta
-    - destino : Conta
-    - valor : float
-    - moeda : str
-    - instante : datetime
-    - formatoPagamento : str
-    - rotuloLavagem : bool
+    + origem : Conta
+    + destino : Conta
+    + valor : float
+    + moeda : str
+    + instante : datetime
+    + formatoPagamento : str
+    + rotuloLavagem : bool
+  }
+
+  class PadraoReal {
+    + tipo : str
+    + transacoes : list[Transacao]
   }
 
   class Grafo {
-    - adjacencia : dict[Conta, list[Transacao]]
-    - adjacenciaTransposta : dict[Conta, list[Transacao]]
+    + adjacencia : dict[Conta, list[Transacao]]
+    + adjacenciaTransposta : dict[Conta, list[Transacao]]
     + adicionarTransacao(t : Transacao)
     + contas() : list[Conta]
     + saidas(c : Conta) : list[Transacao]
@@ -36,107 +41,286 @@ package "grafo" {
     + numVertices() : int
     + numArestas() : int
   }
+
+  class AnaliseGrau <<módulo>> {
+    + analisar_graus_contas(grafo : Grafo, limite_fan_in : int, limite_fan_out : int) : dict
+  }
 }
 
-package "io" {
+package "entrada_saida" as io {
   class LeitorDados {
     + carregarTransacoes(caminho : str, limite : int) : list[Transacao]
     + carregarPadroes(caminho : str) : list[PadraoReal]
     + construirGrafo(transacoes : list[Transacao]) : Grafo
-  }
-  class PadraoReal {
-    - tipo : str
-    - transacoes : list[Transacao]
+    - {static} _normalizarTipo(linha : str) : str
+    - {static} _conta(banco : str, numero : str, contas : dict) : Conta
+    - {static} _parseInstante(s : str) : datetime
+    - {static} _criarTransacao(campos : list[str], contas : dict) : Transacao
   }
 }
 
-package "algoritmos" {
-  abstract class Detector {
-    # config : ConfigDeteccao
-    + {abstract} executar(g : Grafo) : ResultadoDeteccao
-    + nome() : str
-  }
-
+package "grafo (algoritmos)" as algoritmos {
   class DetectorCiclos {
-    - tamanhoMaximo : int
-    - janelaTempo : timedelta
-    + executar(g : Grafo) : ResultadoDeteccao
+    + tamanhoMin : int
+    + tamanhoMax : int
+    + ordemTemporal : bool
+    + limiteCiclos : int
+    + detectar(grafo : Grafo) : list[Ciclo]
+    - _ciclosNaComponente(grafo : Grafo, componente : list[Conta], saida : list[Ciclo])
+    - _dfsDesde(inicio : Conta, vizinhos : dict, indice : dict, saida : list[Ciclo])
+    - _escolher(lista : list[Transacao], instante) : Transacao
+    - _cheio(ciclos : list[Ciclo]) : bool
+    - _componentesFortes(grafo : Grafo) : list[list[Conta]]
   }
 
-  class DetectorComponentesFortes {
-    - tamanhoMinimo : int
-    - razaoArestasInternas : float
-    + executar(g : Grafo) : ResultadoDeteccao
+  class Ciclo {
+    + contas : list[Conta]
+    + transacoes : list[Transacao]
+    + tamanho() : int
+    + valorMinimo() : float
+    + possuiRotuloLavagem() : bool
   }
 
-  class DetectorPassagemRapida {
-    - razaoMinima : float
-    - intervaloMaximo : timedelta
-    + executar(g : Grafo) : ResultadoDeteccao
+  class ComponentesFortes <<módulo>> {
+    + componentesFortes(grafo : Grafo) : list[list[Conta]]
   }
 
-  class ConfigDeteccao {
-    + parametros : dict
+  class DetectorComponentes {
+    + tamanhoMin : int
+    + detectar(grafo : Grafo) : ResultadoComponentes
+    - {static} _componentesFracos(grafo : Grafo) : list[list[Conta]]
+    - _resumir(grafo : Grafo, componentes : list[list[Conta]]) : ResumoComponentes
+    - {static} _analisarCluster(grafo : Grafo, componente : list[Conta]) : Cluster
   }
 
-  class ResultadoDeteccao {
-    - detector : str
-    - contasSuspeitas : set[Conta]
-    - transacoesSuspeitas : list[Transacao]
-    - grupos : list[set[Conta]]
-    - tempoExecucao : float
+  class ResultadoComponentes {
+    + fracos : ResumoComponentes
+    + fortes : ResumoComponentes
+  }
+
+  class ResumoComponentes {
+    + totalComponentes : int
+    + componentesMulticonta : int
+    + tamanhoMaior : int
+    + distribuicaoPorTamanho : dict[int, int]
+    + clusters : list[Cluster]
+    + maioresClusters(limite : int) : list[Cluster]
+  }
+
+  class Cluster {
+    + idsContas : list[str]
+    + numTransacoes : int
+    + valorTotal : float
+    + valoresPorMoeda : dict[str, float]
+    + densidade : float
+    + numRotuladasLavagem : int
+    + numContas() : int <<property>>
+  }
+
+  class AlgoritmosCentralidade <<módulo>> {
+    + centralidadeIntermediacao(grafo : Grafo, amostraFontes : int, profundidadeMax : int, normalizar : bool, semente : int) : dict[Conta, float]
+    + encontrarPontesEArticulacoes(grafo : Grafo) : tuple
+    + detectarPassagemRapida(grafo : Grafo, intervaloMaximo : timedelta, razaoMinima : float) : dict[Conta, PassagemRapida]
+    - _executarBrandes(...) : tuple
+    - _executarTarjanPontesEArticulacoes(contas, adj) : tuple
+  }
+
+  class DetectorCentralidade {
+    + amostraFontes : int
+    + profundidadeMax : int
+    + normalizar : bool
+    + tamanhoMinLadoPonte : int
+    + exigirEntradaESaida : bool
+    + intervaloMaximo : timedelta | None
+    + razaoMinimaRepasse : float
+    + limiteResultados : int
+    + semente : int
+    + detectar(grafo : Grafo) : ResultadoCentralidade
+    - {static} _construirContaIntermediaria(...) : ContaIntermediaria
+    - {static} _construirPontoArticulacao(...) : PontoArticulacao
+    - {static} _construirPontesFluxo(grafo : Grafo, pontesBrutas : list) : list[PonteFluxo]
+  }
+
+  class ResultadoCentralidade {
+    + totalContasAnalisadas : int
+    + fontesAmostradas : int
+    + calculoExato : bool
+    + contasComIntermediacao : int
+    + totalPontosArticulacao : int
+    + totalPontes : int
+    + totalContasPassagemRapida : int
+    + centralidades : dict[Conta, float]
+    + principaisIntermediarias(limite : int) : list[ContaIntermediaria]
+    + principaisArticulacoes(limite : int) : list[PontoArticulacao]
+    + principaisPontes(limite : int) : list[PonteFluxo]
+    + principaisPassagensRapidas(limite : int) : list[PassagemRapida]
+  }
+
+  class ContaIntermediaria {
+    + conta : Conta
+    + centralidade : float
+    + ehPontoArticulacao : bool
+    + numComponentesAoRemover : int
+    + grauEntrada : int
+    + grauSaida : int
+    + valorEntrada : float
+    + valorSaida : float
+    + razaoRepasse : float
+    + numRotuladasLavagem : int
+    + numPassagensRapidas : int
+    + idConta() : str <<property>>
+    + possuiRotuloLavagem() : bool
+  }
+
+  class PontoArticulacao {
+    + conta : Conta
+    + numComponentesAoRemover : int
+    + grauEntrada : int
+    + grauSaida : int
+    + centralidade : float
+    + numRotuladasLavagem : int
+    + idConta() : str <<property>>
+    + possuiRotuloLavagem() : bool
+  }
+
+  class PonteFluxo {
+    + contaA : Conta
+    + contaB : Conta
+    + tamanhoLadoA : int
+    + tamanhoLadoB : int
+    + numTransacoes : int
+    + valorTotal : float
+    + numRotuladasLavagem : int
+    + direcional : str
+    + menorLado() : int <<property>>
+    + possuiRotuloLavagem() : bool
+  }
+
+  class PassagemRapida {
+    + conta : Conta
+    + numEventos : int
+    + melhorRazao : float
+    + menorIntervalo : timedelta
+    + valoresPorMoeda : dict[str, float]
+    + numRotuladasLavagem : int
+    + centralidade : float
+    + ehPontoArticulacao : bool
+    + idConta() : str <<property>>
+    + possuiRotuloLavagem() : bool
   }
 }
 
-package "analise" {
-  class AnalisadorRisco {
-    + combinar(resultados : list[ResultadoDeteccao]) : dict[Conta, float]
-    + ranking(n : int) : list[Conta]
+package "api" as api {
+  class ApiRest <<FastAPI>> {
+    + consultar_base()
+    + atualizar_base(configuracao : ConfiguracaoBase)
+    + resumo(base : Base)
+    + rede(base : Base, conta : str, saltos : int, pagina : int, diretas : bool, por_pagina : int)
+    + conta(base : Base, id : str, pagina : int)
+    + graus(base : Base, pagina : int, ordem : str)
+    + rede_grau(base : Base, conta : str)
+    + ciclos(base : Base, minimo : int, pagina : int)
+    + ciclo(base : Base, id : int)
+    + centralidade(base : Base, pagina : int)
+    + rede_centralidade(base : Base, conta : str)
+    + componentes(base : Base, tipo : str, ...)
+    + componente(base : Base, tipo : str, id : int)
+    + contas_componente(base : Base, tipo : str, id : int, pagina : int)
+  }
+
+  class ConfiguracaoBase <<pydantic.BaseModel>> {
+    + limite : int
+  }
+
+  class BaseAtiva {
+    - _estado : Lock
+    - _processamento : Lock
+    - _base : Base
+    - _limite : int
+    - _versao : int
+    - _situacao : str
+    + status() : dict
+    + obter() : Base
+    + carregar(limite : int) : dict
+    - _status() : dict
+    - _processar(limite : int)
+  }
+
+  class Base {
+    + limite : int
+    + estado_centralidade : str
+    + ranking_centralidade : list[str]
+    + pontuacoes_centralidade : dict[str, float]
+    + modo_centralidade : dict
+    + transacoes() : list[Transacao] <<cached>>
+    + grafo() : Grafo <<cached>>
+    + contas() : dict[str, Conta] <<cached>>
+    + metadados() : dict <<cached>>
+    + graus() : list[dict] <<cached>>
+    + ciclos() : list[Ciclo] <<cached>>
+    + componentes() : dict <<cached>>
+    + lideres() : dict <<cached>>
+    + resumo() : dict <<cached>>
+    + vizinhanca(sementes : list[Conta], saltos : int) : dict
+    + incidentes(conta : Conta) : Iterator[Transacao]
+    + internas(contas) : Iterator[Transacao]
+    + rede(transacoes, pagina : int, sementes, prioritarias, por_pagina : int) : dict
+    + rede_completa(transacoes, contas) : dict
+    + calcular_centralidade()
   }
 }
 
-package "avaliacao" {
-  class Avaliador {
-    + precisao(r : ResultadoDeteccao, g : Grafo) : float
-    + recall(r : ResultadoDeteccao, g : Grafo) : float
-    + medirTempo(d : Detector, g : Grafo) : float
-  }
-}
-
-package "interface" {
-  class InterfaceWeb {
-    + carregarDados()
-    + escolherDetector()
-    + ajustarParametros()
-    + exibirResultados(r : ResultadoDeteccao)
-    + desenharSubgrafo(contas : set[Conta])
-  }
-}
-
+' ---- modelo ----
 Grafo "1" *-- "0..*" Transacao : contém
-Transacao "*" --> "2" Conta : origem / destino
+Transacao --> "1" Conta : origem
+Transacao --> "1" Conta : destino
+PadraoReal "1" o-- "*" Transacao
 Grafo ..> Conta
+AnaliseGrau ..> Grafo : analisa
 
-Detector <|-- DetectorCiclos
-Detector <|-- DetectorComponentesFortes
-Detector <|-- DetectorPassagemRapida
-Detector o-- ConfigDeteccao
-Detector ..> Grafo : analisa
-Detector ..> ResultadoDeteccao : produz
-ResultadoDeteccao "1" o-- "*" Conta
-
+' ---- entrada_saida ----
 LeitorDados ..> Grafo : constrói
 LeitorDados ..> Transacao : cria
+LeitorDados ..> Conta : cria
 LeitorDados ..> PadraoReal : cria
-PadraoReal "1" o-- "*" Transacao
 
-AnalisadorRisco ..> ResultadoDeteccao
-Avaliador ..> ResultadoDeteccao
-Avaliador ..> Detector
-Avaliador ..> Grafo
+' ---- algoritmos ----
+DetectorCiclos ..> Grafo : analisa
+DetectorCiclos ..> ComponentesFortes : usa
+DetectorCiclos ..> Ciclo : produz
+Ciclo "1" o-- "2..*" Conta
+Ciclo "1" o-- "2..*" Transacao
 
-InterfaceWeb ..> LeitorDados
-InterfaceWeb ..> Detector
-InterfaceWeb ..> AnalisadorRisco
-InterfaceWeb ..> Avaliador
+DetectorComponentes ..> Grafo : analisa
+DetectorComponentes ..> ComponentesFortes : usa
+DetectorComponentes ..> ResultadoComponentes : produz
+ResultadoComponentes "1" *-- "2" ResumoComponentes : fracos / fortes
+ResumoComponentes "1" *-- "*" Cluster
+ComponentesFortes ..> Grafo
+
+DetectorCentralidade ..> Grafo : analisa
+DetectorCentralidade ..> AlgoritmosCentralidade : usa
+DetectorCentralidade ..> ResultadoCentralidade : produz
+AlgoritmosCentralidade ..> Grafo
+AlgoritmosCentralidade ..> PassagemRapida : produz
+ResultadoCentralidade "1" *-- "*" ContaIntermediaria
+ResultadoCentralidade "1" *-- "*" PontoArticulacao
+ResultadoCentralidade "1" *-- "*" PonteFluxo
+ResultadoCentralidade "1" *-- "*" PassagemRapida
+ContaIntermediaria --> "1" Conta
+PontoArticulacao --> "1" Conta
+PassagemRapida --> "1" Conta
+PonteFluxo --> "2" Conta : contaA / contaB
+
+' ---- api ----
+ApiRest ..> ConfiguracaoBase
+ApiRest ..> BaseAtiva : "bases"
+ApiRest ..> Base
+BaseAtiva "1" o-- "0..1" Base : _base
+Base ..> LeitorDados
+Base ..> Grafo
+Base ..> AnaliseGrau
+Base ..> DetectorCiclos
+Base ..> DetectorComponentes
+Base ..> DetectorCentralidade
 @enduml
